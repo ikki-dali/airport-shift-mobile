@@ -30,11 +30,45 @@ const PREFERENCE_OPTIONS = [
   { value: '×', label: '出勤不可', color: '#dc2626', bg: '#fee2e2' },
 ];
 
-const TIME_SLOT_OPTIONS = [
-  { value: '終日OK', label: '終日OK' },
-  { value: '午前のみ', label: '午前のみ（〜13:00）' },
-  { value: '午後のみ', label: '午後のみ（13:00〜）' },
+// A〜G時間帯グループ定義
+const TIME_SLOT_GROUPS = [
+  { id: 'A', label: 'A 早朝', time: '4:00〜13:00頃' },
+  { id: 'B', label: 'B 朝', time: '6:00〜15:30頃' },
+  { id: 'C', label: 'C 日中', time: '6:45〜22:00頃' },
+  { id: 'D', label: 'D 午後', time: '12:00〜23:00頃' },
+  { id: 'E', label: 'E 夕方', time: '14:15〜23:00頃' },
+  { id: 'F', label: 'F 夜', time: '16:30〜23:00頃' },
+  { id: 'G', label: 'G 深夜', time: '19:00〜翌朝' },
 ];
+
+const ALL_SLOT_IDS = TIME_SLOT_GROUPS.map((g) => g.id);
+
+// noteからtime_slotsを解析
+function parseTimeSlotsFromNote(note: string | undefined): string[] {
+  if (!note) return ALL_SLOT_IDS;
+  const match = note.match(/\[時間帯:([A-G,]+)\]/);
+  if (match) {
+    return match[1].split(',');
+  }
+  // 旧形式との互換性
+  if (note.includes('午前')) return ['A', 'B'];
+  if (note.includes('午後')) return ['D', 'E', 'F'];
+  return ALL_SLOT_IDS;
+}
+
+// time_slotsをnoteに埋め込む形式に変換
+function formatTimeSlotsForNote(slots: string[], userNote: string): string {
+  const isAllSlots =
+    slots.length === ALL_SLOT_IDS.length &&
+    ALL_SLOT_IDS.every((id) => slots.includes(id));
+
+  if (isAllSlots) {
+    return userNote; // 全時間帯OKの場合は何も付けない
+  }
+
+  const slotsStr = `[時間帯:${slots.join(',')}]`;
+  return userNote ? `${slotsStr} ${userNote}` : slotsStr;
+}
 
 export function RequestModal({
   visible,
@@ -46,30 +80,47 @@ export function RequestModal({
   onDelete,
 }: RequestModalProps) {
   const [selectedPreference, setSelectedPreference] = useState<string>('◯');
-  const [selectedTimeSlot, setSelectedTimeSlot] = useState<string>('終日OK');
+  const [selectedSlots, setSelectedSlots] = useState<string[]>(ALL_SLOT_IDS);
   const [note, setNote] = useState('');
 
   useEffect(() => {
     if (visible) {
       setSelectedPreference(initialRequestType || '◯');
-      setNote(initialNote || '');
-      // noteから時間帯を推測
-      if (initialNote?.includes('午前')) {
-        setSelectedTimeSlot('午前のみ');
-      } else if (initialNote?.includes('午後')) {
-        setSelectedTimeSlot('午後のみ');
-      } else {
-        setSelectedTimeSlot('終日OK');
-      }
+      // noteから時間帯を解析
+      const slots = parseTimeSlotsFromNote(initialNote);
+      setSelectedSlots(slots);
+      // [時間帯:...]を除いた純粋なnoteを取得
+      const cleanNote = initialNote?.replace(/\[時間帯:[A-G,]+\]\s*/, '') || '';
+      setNote(cleanNote);
     }
   }, [visible, initialRequestType, initialNote]);
 
+  const handleSlotToggle = (slotId: string) => {
+    setSelectedSlots((prev) => {
+      if (prev.includes(slotId)) {
+        // 最低1つは選択必須
+        if (prev.length === 1) return prev;
+        return prev.filter((id) => id !== slotId);
+      } else {
+        return [...prev, slotId].sort();
+      }
+    });
+  };
+
+  const handleSelectAll = () => {
+    setSelectedSlots(ALL_SLOT_IDS);
+  };
+
+  const isAllSelected =
+    selectedSlots.length === ALL_SLOT_IDS.length &&
+    ALL_SLOT_IDS.every((id) => selectedSlots.includes(id));
+
   const handleSave = () => {
     // 時間帯をnoteに含める
-    let finalNote = note;
-    if (selectedPreference === '◯' && selectedTimeSlot !== '終日OK') {
-      finalNote = selectedTimeSlot + (note ? ` / ${note}` : '');
-    }
+    const finalNote =
+      selectedPreference === '◯'
+        ? formatTimeSlotsForNote(selectedSlots, note)
+        : note;
     onSave(selectedPreference, finalNote);
   };
 
@@ -137,33 +188,71 @@ export function RequestModal({
               ))}
             </View>
 
-            {/* 時間帯（出勤可能の場合のみ） */}
+            {/* 時間帯グループ（出勤可能の場合のみ） */}
             {selectedPreference === '◯' && (
               <>
-                <Text style={styles.sectionTitle}>時間帯</Text>
-                <View style={styles.timeSlotContainer}>
-                  {TIME_SLOT_OPTIONS.map((option) => (
-                    <TouchableOpacity
-                      key={option.value}
-                      style={[
-                        styles.timeSlotButton,
-                        selectedTimeSlot === option.value &&
-                          styles.timeSlotButtonActive,
-                      ]}
-                      onPress={() => setSelectedTimeSlot(option.value)}
-                    >
-                      <Text
+                <Text style={styles.sectionTitle}>希望時間帯</Text>
+
+                {/* 全時間帯OKボタン */}
+                <TouchableOpacity
+                  style={[
+                    styles.allSlotsButton,
+                    isAllSelected && styles.allSlotsButtonActive,
+                  ]}
+                  onPress={handleSelectAll}
+                >
+                  <FontAwesome
+                    name={isAllSelected ? 'check-circle' : 'circle-o'}
+                    size={20}
+                    color={isAllSelected ? '#16a34a' : '#999'}
+                  />
+                  <Text
+                    style={[
+                      styles.allSlotsText,
+                      isAllSelected && styles.allSlotsTextActive,
+                    ]}
+                  >
+                    全時間帯OK
+                  </Text>
+                </TouchableOpacity>
+
+                <Text style={styles.orText}>または特定時間帯を選択:</Text>
+
+                {/* A〜Gグループボタン */}
+                <View style={styles.slotsGrid}>
+                  {TIME_SLOT_GROUPS.map((group) => {
+                    const isSelected = selectedSlots.includes(group.id);
+                    return (
+                      <TouchableOpacity
+                        key={group.id}
                         style={[
-                          styles.timeSlotText,
-                          selectedTimeSlot === option.value &&
-                            styles.timeSlotTextActive,
+                          styles.slotButton,
+                          isSelected && styles.slotButtonActive,
                         ]}
+                        onPress={() => handleSlotToggle(group.id)}
                       >
-                        {option.label}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
+                        <View style={styles.slotButtonContent}>
+                          <FontAwesome
+                            name={isSelected ? 'check-square' : 'square-o'}
+                            size={16}
+                            color={isSelected ? '#3b82f6' : '#999'}
+                          />
+                          <Text
+                            style={[
+                              styles.slotLabel,
+                              isSelected && styles.slotLabelActive,
+                            ]}
+                          >
+                            {group.label}
+                          </Text>
+                        </View>
+                        <Text style={styles.slotTime}>{group.time}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
                 </View>
+
+                <Text style={styles.slotHint}>※複数選択可</Text>
               </>
             )}
 
@@ -213,7 +302,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    maxHeight: '80%',
+    maxHeight: '85%',
   },
   header: {
     flexDirection: 'row',
@@ -265,28 +354,73 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#666',
   },
-  timeSlotContainer: {
+  allSlotsButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 14,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: '#e5e7eb',
+    backgroundColor: '#f9fafb',
+    gap: 10,
+  },
+  allSlotsButtonActive: {
+    backgroundColor: '#dcfce7',
+    borderColor: '#16a34a',
+  },
+  allSlotsText: {
+    fontSize: 16,
+    color: '#666',
+  },
+  allSlotsTextActive: {
+    color: '#16a34a',
+    fontWeight: '600',
+  },
+  orText: {
+    fontSize: 13,
+    color: '#999',
+    marginTop: 12,
+    marginBottom: 8,
+  },
+  slotsGrid: {
     gap: 8,
   },
-  timeSlotButton: {
-    padding: 14,
+  slotButton: {
+    padding: 12,
     borderRadius: 10,
     borderWidth: 1,
     borderColor: '#e5e7eb',
     backgroundColor: '#f9fafb',
   },
-  timeSlotButtonActive: {
+  slotButtonActive: {
     backgroundColor: '#dbeafe',
     borderColor: '#3b82f6',
   },
-  timeSlotText: {
+  slotButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  slotLabel: {
     fontSize: 15,
     color: '#666',
-    textAlign: 'center',
+    fontWeight: '500',
   },
-  timeSlotTextActive: {
+  slotLabelActive: {
     color: '#3b82f6',
     fontWeight: '600',
+  },
+  slotTime: {
+    fontSize: 12,
+    color: '#999',
+    marginTop: 4,
+    marginLeft: 24,
+  },
+  slotHint: {
+    fontSize: 12,
+    color: '#999',
+    marginTop: 8,
+    textAlign: 'center',
   },
   noteInput: {
     borderWidth: 1,
