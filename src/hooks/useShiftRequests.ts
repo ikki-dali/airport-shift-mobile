@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { format, startOfMonth, endOfMonth } from 'date-fns';
+import { format, startOfMonth, endOfMonth, eachDayOfInterval, getDay } from 'date-fns';
 import { supabase } from '@/src/lib/supabase';
 
 export interface ShiftRequest {
@@ -89,6 +89,76 @@ export function useShiftRequests(yearMonth: Date) {
     }
   };
 
+  // 一括保存（全日に同じ希望を設定）
+  const saveBulkRequests = async (requestType: string): Promise<boolean> => {
+    try {
+      const monthStart = startOfMonth(yearMonth);
+      const monthEnd = endOfMonth(yearMonth);
+      const daysInMonth = eachDayOfInterval({ start: monthStart, end: monthEnd });
+
+      const records = daysInMonth.map((day) => ({
+        staff_id: DUMMY_STAFF_ID,
+        date: format(day, 'yyyy-MM-dd'),
+        request_type: requestType,
+        note: null,
+        year_month: yearMonthStr,
+      }));
+
+      const { error: upsertError } = await supabase
+        .from('shift_requests')
+        .upsert(records, { onConflict: 'staff_id,date' });
+
+      if (upsertError) {
+        throw upsertError;
+      }
+
+      await fetchRequests();
+      return true;
+    } catch (e) {
+      console.error('Error saving bulk shift requests:', e);
+      setError(e instanceof Error ? e.message : '一括設定に失敗しました');
+      return false;
+    }
+  };
+
+  // 曜日一括保存（特定の曜日だけ希望を設定）
+  const saveWeekdayRequests = async (
+    dayOfWeek: number, // 0=日曜, 1=月曜, ..., 6=土曜
+    requestType: string
+  ): Promise<boolean> => {
+    try {
+      const monthStart = startOfMonth(yearMonth);
+      const monthEnd = endOfMonth(yearMonth);
+      const daysInMonth = eachDayOfInterval({ start: monthStart, end: monthEnd });
+
+      // 指定曜日の日付のみフィルタ
+      const targetDays = daysInMonth.filter((day) => getDay(day) === dayOfWeek);
+
+      const records = targetDays.map((day) => ({
+        staff_id: DUMMY_STAFF_ID,
+        date: format(day, 'yyyy-MM-dd'),
+        request_type: requestType,
+        note: null,
+        year_month: yearMonthStr,
+      }));
+
+      const { error: upsertError } = await supabase
+        .from('shift_requests')
+        .upsert(records, { onConflict: 'staff_id,date' });
+
+      if (upsertError) {
+        throw upsertError;
+      }
+
+      await fetchRequests();
+      return true;
+    } catch (e) {
+      console.error('Error saving weekday shift requests:', e);
+      setError(e instanceof Error ? e.message : '曜日一括設定に失敗しました');
+      return false;
+    }
+  };
+
   const deleteRequest = async (date: Date): Promise<boolean> => {
     try {
       const dateStr = format(date, 'yyyy-MM-dd');
@@ -118,6 +188,8 @@ export function useShiftRequests(yearMonth: Date) {
     error,
     refetch: fetchRequests,
     saveRequest,
+    saveBulkRequests,
+    saveWeekdayRequests,
     deleteRequest,
   };
 }
