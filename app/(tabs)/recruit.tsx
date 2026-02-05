@@ -1,13 +1,13 @@
 import { StyleSheet, View, Text } from 'react-native';
 
-export default function HomeScreen() {
+export default function RecruitScreen() {
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>確定シフト一覧</Text>
+      <Text style={styles.title}>募集一覧</Text>
       <View style={styles.placeholder}>
         <Text style={styles.placeholderText}>準備中...</Text>
         <Text style={styles.description}>
-          ここにあなたの確定シフトが表示されます
+          ここにシフト募集が表示されます
         </Text>
       </View>
     </View>
